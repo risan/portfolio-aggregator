@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Portfolio Aggregator</title>
+    <meta name="description" content="Web app to aggregate Indonesia stock market and mutual fund portfolio.">
+    <meta property="og:title" content="Web app to aggregate Indonesia stock market and mutual fund portfolio.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://portfolio-aggregator.vercel.app">
+    <meta property="og:image" content="https://portfolio-aggregator.vercel.app/cover.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="https://portfolio-aggregator.vercel.app/cover.png">
+    <meta name="twitter:title" content="Indonesia Market API">
+    <meta name="twitter:description" content="Web app to aggregate Indonesia stock market and mutual fund portfolio.">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/wysiwyg.css@0.0.3/wysiwyg.css">
+    <link rel=icon href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">📈</text></svg>'>
+    <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@4/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@2/dist/vuetify.min.css" rel="stylesheet">
+</head>
+<body>
+<div id="app">
+    <v-app>
+        <v-app-bar
+            color="green darken-2" app absolute dark dense flat>
+            <v-toolbar-title>Portfolio Aggregator</v-toolbar-title>
+        </v-app-bar>
+        <v-main>
+            <v-container fluid>
+                <v-alert
+                    type="info"
+                    border="top"
+                    elevation="2"
+                    colored-border
+                >
+                    <ol>
+                        <li>Copy the <a href="https://docs.google.com/spreadsheets/d/1URlZYI-yT-wVVmr7Ry9ciqf_AlPRntuX-Xu03PmIP08" class="text-decoration-none">Portfolio Aggregator Template</a> spreadsheet to your Google Drive account.</li>
+                        <li>Fill out your <strong>Mutual Funds</strong> and <strong>Stocks</strong> portfolio.</li>
+                        <li>Share the spreadsheet with <strong>assets-aggregator@risan-personal-project.iam.gserviceaccount.com</strong>.</li>
+                        <li>Paste your Google spreadsheet ID below.</li>
+                    </ol>
+                </v-alert>
+
+                <v-card class="my-5">
+                    <v-card-text>
+                        <v-snackbar :value="error" color="red darken-4" timeout="3000" dark top>
+                            {{ error }}
+                            <template #action="{ attrs }">
+                                <v-btn
+                                    v-bind="attrs"
+                                    text
+                                    @click="error = null"
+                                >
+                                    Close
+                                </v-btn>
+                            </template>
+                        </v-snackbar>
+                        <v-form ref="form" :disabled="fetching" lazy-validation @submit.prevent="submit">
+                            <v-text-field v-model="spreadsheetId" :rules="spreadsheetIdRules" label="Google Spreadsheet ID"></v-text-field>
+
+                            <v-btn :disabled="fetching" :loading="fetching" color="green darken-2 white--text" type="submit">Submit</v-btn>
+                        </v-form>
+                    </v-card-text>
+                </v-card>
+
+                <v-card v-if="mutualFunds.length > 0 || stocks.length > 0" class="mb-5">
+                    <v-card-title>Summary</v-card-title>
+                    <v-data-table
+                        :headers="[
+                            {
+                                text: 'Type',
+                                value: 'type',
+                            },
+                            {
+                                text: 'Allocation',
+                                value: 'allocation_ratio',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Average Value',
+                                value: 'average_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Market Value',
+                                value: 'market_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change',
+                                value: 'change',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change %',
+                                value: 'change_ratio',
+                                align: 'end',
+                            },
+                        ]"
+                        :items="aggregate"
+                        :loading="fetching"
+                        dense
+                        disable-pagination
+                        hide-default-footer
+                    >
+                        <template #item.allocation_ratio="{ value }">
+                            {{ value | percent }}
+                        </template>
+
+                        <template #item.average_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.market_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.change="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | decimal }}
+                            </span>
+                        </template>
+
+                        <template #item.change_ratio="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | percent }}
+                            </span>
+                        </template>
+
+                        <template #body.append="{ items }">
+                            <tr>
+                                <td class="font-weight-bold">
+                                    Total
+                                </td>
+                                <td></td>
+                                <td class="text-end font-weight-bold">
+                                    {{ totalAverageValue | decimal }}
+                                </td>
+                                <td class="text-end font-weight-bold">
+                                    {{ totalMarketValue | decimal }}
+                                </td>
+                                <td :class="$options.changeClass(totalMarketValue - totalAverageValue)" class="text-end font-weight-bold">
+                                    {{ totalMarketValue - totalAverageValue | decimal }}
+                                </td>
+                                <td :class="$options.changeClass(totalMarketValue - totalAverageValue)" class="text-end font-weight-bold">
+                                    {{ (totalMarketValue - totalAverageValue) / (totalAverageValue === 0 ? 1 : totalAverageValue) | percent }}
+                                </td>
+                            </tr>
+                        </template>
+                    </v-data-table>
+                </v-card>
+
+                <v-card v-if="mutualFundsByType.length > 0" class="mb-5">
+                    <v-card-title>Mutual Funds by Type</v-card-title>
+                    <v-data-table
+                        :headers="[
+                            {
+                                text: 'Type',
+                                value: 'type',
+                            },
+                            {
+                                text: 'Allocation',
+                                value: 'allocation_ratio',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Average Value',
+                                value: 'average_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Market Value',
+                                value: 'market_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change',
+                                value: 'change',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change %',
+                                value: 'change_ratio',
+                                align: 'end',
+                            },
+                        ]"
+                        :items="mutualFundsByType"
+                        :loading="fetching"
+                        dense
+                        disable-pagination
+                        hide-default-footer
+                    >
+                        <template #item.allocation_ratio="{ value }">
+                            {{ value | percent }}
+                        </template>
+
+                        <template #item.average_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.market_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.change="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | decimal }}
+                            </span>
+                        </template>
+
+                        <template #item.change_ratio="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | percent }}
+                            </span>
+                        </template>
+                    </v-data-table>
+                </v-card>
+
+                <v-card v-if="stocksBySector.length > 0" class="mb-5">
+                    <v-card-title>Stocks by Sector</v-card-title>
+                    <v-data-table
+                        :headers="[
+                            {
+                                text: 'Sector',
+                                value: 'sector',
+                            },
+                            {
+                                text: 'Allocation',
+                                value: 'allocation_ratio',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Average Value',
+                                value: 'average_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Market Value',
+                                value: 'market_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change',
+                                value: 'change',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change %',
+                                value: 'change_ratio',
+                                align: 'end',
+                            },
+                        ]"
+                        :items="stocksBySector"
+                        :loading="fetching"
+                        dense
+                        disable-pagination
+                        hide-default-footer
+                    >
+                        <template #item.allocation_ratio="{ value }">
+                            {{ value | percent }}
+                        </template>
+
+                        <template #item.average_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.market_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.change="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | decimal }}
+                            </span>
+                        </template>
+
+                        <template #item.change_ratio="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | percent }}
+                            </span>
+                        </template>
+                    </v-data-table>
+                </v-card>
+
+                <v-card v-if="stocksBySubsector.length > 0" class="mb-5">
+                    <v-card-title>Stocks by Subsector</v-card-title>
+                    <v-data-table
+                        :headers="[
+                            {
+                                text: 'Subsector',
+                                value: 'subsector',
+                            },
+                            {
+                                text: 'Allocation',
+                                value: 'allocation_ratio',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Average Value',
+                                value: 'average_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Market Value',
+                                value: 'market_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change',
+                                value: 'change',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change %',
+                                value: 'change_ratio',
+                                align: 'end',
+                            },
+                        ]"
+                        :items="stocksBySubsector"
+                        :loading="fetching"
+                        dense
+                        disable-pagination
+                        hide-default-footer
+                    >
+                        <template #item.allocation_ratio="{ value }">
+                            {{ value | percent }}
+                        </template>
+
+                        <template #item.average_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.market_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.change="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | decimal }}
+                            </span>
+                        </template>
+
+                        <template #item.change_ratio="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | percent }}
+                            </span>
+                        </template>
+                    </v-data-table>
+                </v-card>
+
+                <v-card v-if="mutualFundsByPlatform.length > 1" class="mb-5">
+                    <v-card-title>Mutual Funds by Platform</v-card-title>
+                    <v-data-table
+                        :headers="[
+                            {
+                                text: 'Platform',
+                                value: 'platform',
+                            },
+                            {
+                                text: 'Allocation',
+                                value: 'allocation_ratio',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Average Value',
+                                value: 'average_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Market Value',
+                                value: 'market_value',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change',
+                                value: 'change',
+                                align: 'end',
+                            },
+                            {
+                                text: 'Change %',
+                                value: 'change_ratio',
+                                align: 'end',
+                            },
+                        ]"
+                        :items="mutualFundsByPlatform"
+                        :loading="fetching"
+                        dense
+                        disable-pagination
+                        hide-default-footer
+                    >
+                        <template #item.allocation_ratio="{ value }">
+                            {{ value | percent }}
+                        </template>
+
+                        <template #item.average_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.market_value="{ value }">
+                            {{ value | decimal }}
+                        </template>
+
+                        <template #item.change="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | decimal }}
+                            </span>
+                        </template>
+
+                        <template #item.change_ratio="{ value }">
+                            <span :class="$options.changeClass(value)">
+                                {{ value | percent }}
+                            </span>
+                        </template>
+                    </v-data-table>
+                </v-card>
+
+                <v-card class="mb-5">
+                    <v-tabs v-model="tab" class="mb-3">
+                        <v-tab>Mutual Funds</v-tab>
+                        <v-tab>Stocks</v-tab>
+                    </v-tabs>
+
+                    <v-tabs-items v-model="tab">
+                        <v-tab-item>
+                            <v-data-table
+                                :headers="[
+                                    {
+                                        text: 'Product',
+                                        value: 'name',
+                                    },
+                                    {
+                                        text: 'Platform',
+                                        value: 'platform',
+                                    },
+                                    {
+                                        text: 'Type',
+                                        value: 'type',
+                                    },
+                                    {
+                                        text: 'Units',
+                                        value: 'units',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Average Price',
+                                        value: 'average_price',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Last Price',
+                                        value: 'last_price',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Average Value',
+                                        value: 'average_value',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Market Value',
+                                        value: 'market_value',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Change',
+                                        value: 'change',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Change %',
+                                        value: 'change_ratio',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Last Update',
+                                        value: 'last_update',
+                                    },
+                                ]"
+                                :items="mutualFundItems"
+                                :loading="fetching"
+                                dense
+                                disable-pagination
+                                hide-default-footer
+                            >
+                                <template #item.average_value="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.units="{ value }">
+                                    {{ value | decimal(4) }}
+                                </template>
+
+                                <template #item.average_price="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.last_price="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.market_value="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.change="{ value }">
+                                    <span :class="$options.changeClass(value)">
+                                        {{ value | decimal }}
+                                    </span>
+                                </template>
+
+                                <template #item.change_ratio="{ value }">
+                                    <span :class="$options.changeClass(value)">
+                                        {{ value | percent }}
+                                    </span>
+                                </template>
+
+                                <template #item.last_update="{ value }">
+                                    {{ value | ymd }}
+                                </template>
+
+                                <template #body.append="{ items }">
+                                    <tr>
+                                        <td class="font-weight-bold">
+                                            Total
+                                        </td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td class="text-end font-weight-bold">
+                                            {{ mutualFundsTotalAverageValue | decimal }}
+                                        </td>
+                                        <td class="text-end font-weight-bold">
+                                            {{ mutualFundsTotalMarketValue | decimal }}
+                                        </td>
+                                        <td :class="$options.changeClass(mutualFundsTotalMarketValue - mutualFundsTotalAverageValue)" class="text-end font-weight-bold">
+                                            {{ mutualFundsTotalMarketValue - mutualFundsTotalAverageValue | decimal }}
+                                        </td>
+                                        <td :class="$options.changeClass(mutualFundsTotalMarketValue - mutualFundsTotalAverageValue)" class="text-end font-weight-bold">
+                                            {{ (mutualFundsTotalMarketValue - mutualFundsTotalAverageValue) / (mutualFundsTotalAverageValue === 0 ? 1 : mutualFundsTotalAverageValue) | percent }}
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                </template>
+                            </v-data-table>
+                        </v-tab-item>
+                        <v-tab-item>
+                            <v-data-table
+                                :headers="[
+                                    {
+                                        text: 'Name',
+                                        value: 'name',
+                                    },
+                                    {
+                                        text: 'Code',
+                                        value: 'code',
+                                    },
+                                    {
+                                        text: 'Sector',
+                                        value: 'sector',
+                                    },
+                                    {
+                                        text: 'Subsector',
+                                        value: 'subsector',
+                                    },
+                                    {
+                                        text: 'Units',
+                                        value: 'units',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Average Price',
+                                        value: 'average_price',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Last Price',
+                                        value: 'last_price',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Average Value',
+                                        value: 'average_value',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Market Value',
+                                        value: 'market_value',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Change',
+                                        value: 'change',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Change %',
+                                        value: 'change_ratio',
+                                        align: 'end',
+                                    },
+                                    {
+                                        text: 'Last Update',
+                                        value: 'last_update',
+                                    },
+                                ]"
+                                :items="stockItems"
+                                :loading="fetching"
+                                dense
+                                disable-pagination
+                                hide-default-footer
+                            >
+                                <template #item.average_value="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.units="{ value }">
+                                    {{ value | decimal(4) }}
+                                </template>
+
+                                <template #item.average_price="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.last_price="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.market_value="{ value }">
+                                    {{ value | decimal }}
+                                </template>
+
+                                <template #item.change="{ value }">
+                                    <span :class="$options.changeClass(value)">
+                                        {{ value | decimal }}
+                                    </span>
+                                </template>
+
+                                <template #item.change_ratio="{ value }">
+                                    <span :class="$options.changeClass(value)">
+                                        {{ value | percent }}
+                                    </span>
+                                </template>
+
+                                <template #item.last_update="{ value }">
+                                    {{ value | ymd }}
+                                </template>
+
+                                <template #body.append="{ items }">
+                                    <tr>
+                                        <td class="font-weight-bold">
+                                            Total
+                                        </td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td class="text-end font-weight-bold">
+                                            {{ stocksTotalAverageValue | decimal }}
+                                        </td>
+                                        <td class="text-end font-weight-bold">
+                                            {{ stocksTotalMarketValue | decimal }}
+                                        </td>
+                                        <td :class="$options.changeClass(stocksTotalMarketValue - stocksTotalAverageValue)" class="text-end font-weight-bold">
+                                            {{ stocksTotalMarketValue - stocksTotalAverageValue | decimal }}
+                                        </td>
+                                        <td :class="$options.changeClass(stocksTotalMarketValue - stocksTotalAverageValue)" class="text-end font-weight-bold">
+                                            {{ (stocksTotalMarketValue - stocksTotalAverageValue) / (stocksTotalAverageValue === 0 ? 1 : stocksTotalAverageValue) | percent }}
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                </template>
+                            </v-data-table>
+                        </v-tab-item>
+                    </v-tabs-items>
+                </v-card>
+            </v-container>
+        </v-main>
+        <v-footer class="py-5" app absolute>
+            By&nbsp;<a href="https://risanb.com">Risan Bagja</a>&nbsp;|&nbsp;<a href="https://github.com/risan/portfolio-aggregator">Source Code</a>
+        </v-footer>
+    </v-app>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vuetify@2/dist/vuetify.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lodash@4.17.20/lodash.min.js"></script>
+
+<script>
+  new Vue({
+    el: '#app',
+    vuetify: new Vuetify(),
+
+    changeClass(value) {
+      if (value === null || value === undefined) {
+        return;
+      }
+
+      if (value > 0) {
+        return 'green--text';
+      }
+
+      if (value < 0) {
+        return 'red--text';
+      }
+    },
+
+    filters: {
+      decimal(value, fractionDigits = 2) {
+        if (value === null || value === undefined) {
+          return value;
+        }
+
+        const decimal = new Intl.NumberFormat('en-US', {
+          style: 'decimal',
+          minimumFractionDigits: fractionDigits,
+          maximumFractionDigits: fractionDigits,
+        });
+
+        return decimal.format(value);
+      },
+
+      percent(value, fractionDigits = 2) {
+        if (value === null || value === undefined) {
+          return value;
+        }
+
+        const percent = new Intl.NumberFormat('en-US', {
+          style: 'percent',
+          minimumFractionDigits: fractionDigits,
+          maximumFractionDigits: fractionDigits,
+        });
+
+        return percent.format(value);
+      },
+
+      ymd(value) {
+        if (value === null || value === undefined || typeof value === 'boolean') {
+          return null;
+        }
+
+        let date = value;
+
+        if (!(date instanceof Date)) {
+          date = new Date(value);
+        }
+
+        if (Number.isNaN(date)) {
+          return null;
+        }
+
+        return `${date.getFullYear()}-${(`${date.getMonth() + 1}`).padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+      },
+    },
+
+    data() {
+      let spreadsheetId = (new URLSearchParams(window.location.search)).get('spreadsheetId');
+
+      if (typeof spreadsheetId !== 'string' || spreadsheetId.trim().length === 0) {
+        spreadsheetId = '1URlZYI-yT-wVVmr7Ry9ciqf_AlPRntuX-Xu03PmIP08';
+      }
+
+      return {
+        error: null,
+        spreadsheetId,
+        spreadsheetIdRules: [
+          v => v.trim().length > 0 || 'Google Sheet ID is required.',
+        ],
+        fetching: false,
+        tab: null,
+        mutualFunds: [],
+        stocks: [],
+      };
+    },
+
+    computed: {
+      mutualFundItems() {
+        return this.mutualFunds.map(i => {
+            const marketValue = i.last_price === null ? null : i.units * i.last_price;
+            const change = marketValue === null ? null : marketValue - i.average_value;
+
+            return {
+              ...i,
+              average_price: i.average_value / i.units,
+              market_value: marketValue,
+              change,
+              change_ratio: change === null ? null : change / i.average_value,
+              last_update: i.last_update ? new Date(i.last_update) : null,
+            };
+        });
+      },
+
+      aggregate() {
+        return [
+          ...this.mutualFundsByType,
+          {
+            type: 'Stock',
+            average_value: this.stocksTotalAverageValue,
+            market_value: this.stocksTotalMarketValue,
+            change: this.stocksTotalMarketValue - this.stocksTotalAverageValue,
+            change_ratio: (this.stocksTotalMarketValue - this.stocksTotalAverageValue) / this.stocksTotalAverageValue,
+          }
+        ].map(item => ({
+          ...item,
+          allocation_ratio: item.average_value / this.totalAverageValue,
+        }));
+      },
+
+      mutualFundsByType() {
+        return Object.values(_.groupBy(this.mutualFundItems, 'type')).map(items => {
+          const averageValue = _.sumBy(items, 'average_value');
+          const marketValue = _.sumBy(items, 'market_value');
+          const change = marketValue - averageValue;
+
+          return {
+            type: items[0].type,
+            allocation_ratio: averageValue / this.mutualFundsTotalAverageValue,
+            average_value: averageValue,
+            market_value: marketValue,
+            change,
+            change_ratio: change / averageValue,
+          };
+        });
+      },
+
+      mutualFundsByPlatform() {
+        return Object.values(_.groupBy(this.mutualFundItems, 'platform')).map(items => {
+          const averageValue = _.sumBy(items, 'average_value');
+          const marketValue = _.sumBy(items, 'market_value');
+          const change = marketValue - averageValue;
+
+          return {
+            platform: items[0].platform,
+            allocation_ratio: averageValue / this.mutualFundsTotalAverageValue,
+            average_value: averageValue,
+            market_value: marketValue,
+            change,
+            change_ratio: change / averageValue,
+          };
+        });
+      },
+
+      mutualFundsTotalAverageValue() {
+        return _.sumBy(this.mutualFundItems, 'average_value');
+      },
+
+      mutualFundsTotalMarketValue() {
+        return _.sumBy(this.mutualFundItems, 'market_value');
+      },
+
+      stockItems() {
+        return this.stocks.map(i => {
+          const marketValue = i.last_price === null ? null : i.units * i.last_price;
+          const change = marketValue === null ? null : marketValue - i.average_value;
+
+          return {
+            ...i,
+            average_price: i.average_value / i.units,
+            market_value: marketValue,
+            change,
+            change_ratio: change === null ? null : change / i.average_value,
+            last_update: i.last_update ? new Date(i.last_update) : null,
+          };
+        });
+      },
+
+      stocksBySector() {
+        return Object.values(_.groupBy(this.stockItems, 'sector')).map(items => {
+          const averageValue = _.sumBy(items, 'average_value');
+          const marketValue = _.sumBy(items, 'market_value');
+          const change = marketValue - averageValue;
+
+          return {
+            sector: items[0].sector,
+            allocation_ratio: averageValue / this.stocksTotalAverageValue,
+            average_value: averageValue,
+            market_value: marketValue,
+            change,
+            change_ratio: change / averageValue,
+          };
+        });
+      },
+
+      stocksBySubsector() {
+        return Object.values(_.groupBy(this.stockItems, 'subsector')).map(items => {
+          const averageValue = _.sumBy(items, 'average_value');
+          const marketValue = _.sumBy(items, 'market_value');
+          const change = marketValue - averageValue;
+
+          return {
+            subsector: items[0].subsector,
+            allocation_ratio: averageValue / this.stocksTotalAverageValue,
+            average_value: averageValue,
+            market_value: marketValue,
+            change,
+            change_ratio: change / averageValue,
+          };
+        });
+      },
+
+      stocksTotalAverageValue() {
+        return _.sumBy(this.stockItems, 'average_value');
+      },
+
+      stocksTotalMarketValue() {
+        return _.sumBy(this.stockItems, 'market_value');
+      },
+
+      totalAverageValue() {
+        return this.mutualFundsTotalAverageValue + this.stocksTotalAverageValue;
+      },
+
+      totalMarketValue() {
+        return this.mutualFundsTotalMarketValue + this.stocksTotalMarketValue;
+      },
+    },
+
+    mounted() {
+      if (this.spreadsheetId && (new URLSearchParams(window.location.search)).get('spreadsheetId') !== null) {
+        this.submit();
+      }
+    },
+
+    methods: {
+      async submit() {
+        const valid = this.$refs.form.validate();
+
+        if (!valid) {
+          return;
+        }
+
+        this.error = null;
+        this.fetching = true;
+
+        try {
+          const [mutualFundsRes, stocksRes] = await Promise.all([
+            fetch(`/api/mutual-funds?spreadsheetId=${this.spreadsheetId}`),
+            fetch(`/api/stocks?spreadsheetId=${this.spreadsheetId}`),
+          ]);
+
+          const [mutualFundData, stockData] = await Promise.all([
+            mutualFundsRes.json(),
+            stocksRes.json(),
+          ]);
+
+          if (mutualFundsRes.status >= 400) {
+            this.error = mutualFundData.error;
+          } else if (stocksRes.status >= 400) {
+            this.error = stockData.error;
+          } else {
+            this.mutualFunds = mutualFundData;
+            this.stocks = stockData;
+          }
+        } catch (error) {
+          this.error = error.message;
+        }
+
+        this.fetching = false;
+      },
+    },
+  });
+</script>
+</body>
+</html>

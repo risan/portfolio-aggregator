@@ -1,0 +1,4 @@
+.idea
+.vercel
+credentials.json
+node_modules
